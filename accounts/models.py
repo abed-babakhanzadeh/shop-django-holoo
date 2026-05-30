@@ -114,10 +114,10 @@ class CustomUser(AbstractUser):
         max_length=50, 
         blank=True, 
         null=True, 
-        unique=True,
+        db_index=True,  # به جای unique — سرعت جستجو رو داری، بدون بحث NULL
         verbose_name=_('کد طرف حساب هلو (Code)'),
-        help_text=_('کد عددی مشتری در هلو (ReturnParam1)')
-    ) # <-- جدید
+        help_text=_('کد عددی مشتری در هلو - ReturnParam1')
+    )
     
     USERNAME_FIELD = 'mobile'
     REQUIRED_FIELDS = [] 
