@@ -54,13 +54,16 @@ class CustomUserAdmin(ModelAdminJalaliMixin, admin.ModelAdmin):
             'fields': ('mobile', 'password')
         }),
         (_('وضعیت و تاییدات'), {
-            'fields': ('status', 'customer_type', 'is_mobile_verified', 'is_active', 'registered_via')
+            'fields': ('status', 'customer_type', 'is_mobile_verified', 'is_blacklisted', 'is_active', 'registered_via')
         }),
         (_('اطلاعات هویتی و شرکتی'), {
             'fields': ('first_name', 'last_name', 'company_name', 'national_id', 'economic_code', 'telephone')
         }),
-        (_('ارتباط با هلو'), {
-            'fields': ('holoo_erp_code',),
+        (_('اعتبار مالی هلو'), {
+            'fields': ('credit_limit',),
+        }),
+        (_('ارتباط با حسابداری هلو'), {
+            'fields': ('holoo_customer_code', 'holoo_erp_code'),
             'classes': ('collapse',) 
         }),
         (_('دسترسی‌های سیستمی'), {

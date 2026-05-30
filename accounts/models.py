@@ -5,17 +5,17 @@ from django.utils import timezone
 from django.conf import settings
 
 # ==========================================
-# 1. Choices
+# 1. Choices & Constants
 # ==========================================
 class CustomerType(models.TextChoices):
-    UNKNOWN = 'unknown', _('نامشخص / در انتظار') # <-- اصلاح شد
-    RETAIL = 'retail', _('مشتری عادی')
-    WHOLESALE = 'wholesale', _('بنک‌دار')
-    CREDIT = 'credit', _('مشتری چکی')
-    VIP = 'vip', _('مشتری VIP')
+    UNKNOWN = 'unknown', _('نامشخص / در انتظار تعیین')
+    RETAIL = 'retail', _('مشتری عادی')        # نگاشت به SellPrice در هلو
+    WHOLESALE = 'wholesale', _('بنک‌دار')    # نگاشت به SellPrice2 در هلو
+    CREDIT = 'credit', _('مشتری چکی')        # نگاشت به SellPrice3 در هلو
+    VIP = 'vip', _('مشتری VIP')             # نگاشت به SellPrice4 در هلو
 
 class UserStatus(models.TextChoices):
-    PENDING = 'pending', _('در انتظار بررسی')
+    PENDING = 'pending', _('در انتظار بررسی ادمین')
     APPROVED = 'approved', _('تایید شده')
     REJECTED = 'rejected', _('رد شده')
     SUSPENDED = 'suspended', _('معلق')
@@ -25,6 +25,7 @@ class RegistrationMethod(models.TextChoices):
     PASSWORD = 'password', _('رمز عبور')
     ADMIN = 'admin', _('توسط ادمین')
     HOLOO = 'holoo', _('ایمپورت از هلو')
+
 
 # ==========================================
 # 2. User Manager
@@ -54,15 +55,16 @@ class CustomUserManager(BaseUserManager):
 
         return self.create_user(mobile, password, **extra_fields)
 
+
 # ==========================================
 # 3. Core User Model
 # ==========================================
 class CustomUser(AbstractUser):
     username = None 
     
+    # --- احراز هویت و امنیت ---
     mobile = models.CharField(max_length=15, unique=True, verbose_name=_('شماره موبایل'))
     is_mobile_verified = models.BooleanField(default=False, verbose_name=_('موبایل تایید شده'))
-    
     registered_via = models.CharField(
         max_length=20, 
         choices=RegistrationMethod.choices, 
@@ -70,11 +72,12 @@ class CustomUser(AbstractUser):
         verbose_name=_('روش ثبت‌نام')
     )
 
+    # --- وضعیت و نوع در سیستم ---
     customer_type = models.CharField(
         max_length=20, 
         choices=CustomerType.choices, 
-        default=CustomerType.UNKNOWN, # <-- اصلاح شد
-        verbose_name=_('نوع مشتری')
+        default=CustomerType.UNKNOWN, 
+        verbose_name=_('نوع مشتری (تجاری)')
     )
     status = models.CharField(
         max_length=20, 
@@ -82,12 +85,24 @@ class CustomUser(AbstractUser):
         default=UserStatus.PENDING, 
         verbose_name=_('وضعیت حساب')
     )
+    is_blacklisted = models.BooleanField(default=False, verbose_name=_('لیست سیاه هلو')) # <-- جدید
 
-    national_id = models.CharField(max_length=20, blank=True, null=True, verbose_name=_('کد ملی'))
+    # --- اطلاعات هویتی و شرکتی ---
+    national_id = models.CharField(max_length=20, blank=True, null=True, verbose_name=_('کد ملی / شناسه ملی'))
     economic_code = models.CharField(max_length=50, blank=True, null=True, verbose_name=_('کد اقتصادی'))
     company_name = models.CharField(max_length=255, blank=True, null=True, verbose_name=_('نام شرکت/فروشگاه'))
     telephone = models.CharField(max_length=20, blank=True, null=True, verbose_name=_('تلفن ثابت'))
 
+    # --- اعتبارسنجی و مالی هلو ---
+    credit_limit = models.DecimalField(
+        max_digits=15, 
+        decimal_places=0, 
+        default=0, 
+        blank=True, 
+        verbose_name=_('سقف اعتبار چکی (تومان)')
+    ) # <-- جدید
+
+    # --- ارتباط با حسابداری هلو ---
     holoo_erp_code = models.CharField(
         max_length=255, 
         blank=True, 
@@ -95,6 +110,14 @@ class CustomUser(AbstractUser):
         unique=True,
         verbose_name=_('شناسه هلو (ErpCode)')
     )
+    holoo_customer_code = models.CharField(
+        max_length=50, 
+        blank=True, 
+        null=True, 
+        unique=True,
+        verbose_name=_('کد طرف حساب هلو (Code)'),
+        help_text=_('کد عددی مشتری در هلو (ReturnParam1)')
+    ) # <-- جدید
     
     USERNAME_FIELD = 'mobile'
     REQUIRED_FIELDS = [] 
@@ -106,7 +129,19 @@ class CustomUser(AbstractUser):
         verbose_name_plural = _('کاربران')
 
     def __str__(self):
-        return f"{self.company_name or self.first_name} ({self.mobile})"
+        return f"{self.company_name or self.first_name or self.mobile} ({self.mobile})"
+
+    # متد داینامیک برای فهمیدن اینکه این کاربر کدام ستون قیمت هلو را باید ببیند
+    @property
+    def holoo_price_field(self):
+        price_map = {
+            CustomerType.RETAIL: 'sellprice',      # قیمت فروش ۱
+            CustomerType.WHOLESALE: 'sellprice2',  # قیمت فروش ۲
+            CustomerType.CREDIT: 'sellprice3',     # قیمت فروش ۳
+            CustomerType.VIP: 'sellprice4',        # قیمت فروش ۴
+            CustomerType.UNKNOWN: 'sellprice',     # پیش‌فرض برای نامشخص‌ها
+        }
+        return price_map.get(self.customer_type, 'sellprice')
 
 
 # ==========================================
@@ -131,7 +166,6 @@ class Address(models.Model):
         verbose_name_plural = _('آدرس‌ها')
 
     def save(self, *args, **kwargs):
-        # رفع باگ: exclude خود رکورد فعلی
         if self.is_default:
             Address.objects.filter(user=self.user).exclude(pk=self.pk).update(is_default=False)
         super().save(*args, **kwargs)
@@ -145,8 +179,8 @@ class BankAccount(models.Model):
     
     bank_name = models.CharField(max_length=50, verbose_name=_('نام بانک'))
     owner_name = models.CharField(max_length=150, verbose_name=_('نام صاحب حساب'))
-    card_number = models.CharField(max_length=20, unique=True, blank=True, null=True, verbose_name=_('شماره کارت')) # <-- یونیک شد
-    shaba_number = models.CharField(max_length=30, unique=True, blank=True, null=True, verbose_name=_('شماره شبا (IR)')) # <-- یونیک شد
+    card_number = models.CharField(max_length=20, unique=True, blank=True, null=True, verbose_name=_('شماره کارت'))
+    shaba_number = models.CharField(max_length=30, unique=True, blank=True, null=True, verbose_name=_('شماره شبا (IR)'))
     
     is_approved = models.BooleanField(default=False, verbose_name=_('تایید شده توسط ادمین'))
     is_default = models.BooleanField(default=False, verbose_name=_('حساب پیش‌فرض'))
@@ -156,14 +190,13 @@ class BankAccount(models.Model):
         verbose_name_plural = _('حساب‌های بانکی')
 
     def save(self, *args, **kwargs):
-        # رفع باگ: exclude خود رکورد فعلی
         if self.is_default:
             BankAccount.objects.filter(user=self.user).exclude(pk=self.pk).update(is_default=False)
         super().save(*args, **kwargs)
 
 
 # ==========================================
-# 6. Wallet Model (اضافه شد)
+# 6. Wallet Model
 # ==========================================
 class Wallet(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='wallet', verbose_name=_('کاربر'))
@@ -181,7 +214,6 @@ class Wallet(models.Model):
 # 7. OTP Code Model
 # ==========================================
 class OTPCode(models.Model):
-    # قابلیت اتصال به کاربر (اگر وجود داشته باشد) اضافه شد
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
         null=True, 
